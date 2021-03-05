@@ -71,17 +71,12 @@ class ReviewableMixin:
             else:
                 raise Exception(f"Not implemented: {self.__class}")
 
-            if card.status == AgileCard.COMPLETE and old_status != AgileCard.COMPLETE:
-                progress_instance.complete_time = timezone.now()
-            if card.status != AgileCard.COMPLETE:
-                progress_instance.complete_time = None
-
             card.save()
 
     def latest_review(self, trusted=None, timestamp_greater_than=None):
 
         query = self.reviews_queryset()
-        if trusted != None:
+        if trusted != None and self.__class__ == RecruitProject:
             query = query.filter(trusted=trusted)
         if timestamp_greater_than != None:
             query = query.filter(timestamp__gt=timestamp_greater_than)
@@ -365,6 +360,30 @@ class ReviewTrust(models.Model, FlavourMixin, ContentItemProxyMixin):
     def __str__(self):
         return f"{self.content_item} {[f.name for f in self.flavours.all()]}"
 
+    def update_previous_reviews(self):
+        if self.content_item.content_type == ContentItem.TOPIC:
+            raise NotImplementedError()
+
+        previous_untrusted_reviews = RecruitProjectReview.objects.filter(
+            reviewer_user=self.user,
+            recruit_project__content_item=self.content_item,
+            trusted=False,
+        )
+
+        previous_untrusted_reviews = [
+            o
+            for o in previous_untrusted_reviews
+            if o.recruit_project.flavours_match([o.name for o in self.flavours.all()])
+        ]
+
+        for review in previous_untrusted_reviews:
+            card = review.recruit_project.agile_card
+            if card.status == AgileCard.IN_REVIEW:
+                review.trusted = True
+                review.save()
+                review.recruit_project.update_associated_card_status()
+                review.update_recent_validation_flags_for_project()
+
 
 class RecruitProject(
     models.Model, Mixins, FlavourMixin, ReviewableMixin, ContentItemProxyMixin
@@ -596,6 +615,31 @@ class RecruitProjectReview(models.Model, Mixins):
     def reviewer_user_email(self):
         return self.reviewer_user.email
 
+    def update_recent_validation_flags_for_project(self):
+        """this review was just added. Look at recent reviews to see if there is agreement or contradiction"""
+        reviews = RecruitProjectReview.objects.filter(
+            recruit_project=self.recruit_project
+        ).filter(timestamp__lt=self.timestamp)
+        since_time = self.recruit_project.review_request_time
+        if since_time:
+            reviews = reviews.filter(timestamp__gte=since_time)
+
+        for review in reviews:
+            review.update_validated_from(self)
+
+    def update_validated_from(self, other):
+        positive = [COMPETENT, EXCELLENT]
+        negative = [NOT_YET_COMPETENT, RED_FLAG]
+        if other.trusted:
+            if self.status in positive and other.status in positive:
+                self.validated = RecruitProjectReview.CORRECT
+            else:
+                self.validated = RecruitProjectReview.INCORRECT
+        else:
+            if self.status in positive and other.status in negative:
+                self.validated = RecruitProjectReview.CONTRADICTED
+        self.save()
+
 
 class TopicProgress(models.Model, Mixins, ContentItemProxyMixin, ReviewableMixin):
     user = models.ForeignKey(User, on_delete=models.PROTECT)
@@ -715,8 +759,17 @@ class AgileCard(models.Model, Mixins, FlavourMixin, ContentItemProxyMixin):
     )
 
     # cards are automatically generated and pruned based on what is in the user's
-    # curriculum and what they have done so far. Sometimes they really shouldn't be pruned.
+    # curriculum and what they h\ave done so far. Sometimes they really shouldn't be pruned.
     # this field is filled in by signals
+
+    @property
+    def progress_instance(self):
+        if self.recruit_project_id:
+            return self.recruit_project
+        if self.topic_progress_id:
+            return self.topic_progress
+        if self.workshop_attendance_id:
+            return self.workshop_attendance
 
     def save(self, *args, **kwargs):
         if self.content_item.project_submission_type == ContentItem.NO_SUBMIT:
@@ -892,6 +945,7 @@ class AgileCard(models.Model, Mixins, FlavourMixin, ContentItemProxyMixin):
         - add assignees as collaborator
         """
         from .helpers import create_or_update_single_project_card
+        from long_running_request_actors import add_collaborator_and_protect_master
 
         assert (
             self.assignees.count() == 1
@@ -904,6 +958,12 @@ class AgileCard(models.Model, Mixins, FlavourMixin, ContentItemProxyMixin):
                 card_flavour_names=self.flavour_names
             )
             assert self.recruit_project.repository
+            # retry it just in case of github having eventual consistency issues
+
+            add_collaborator_and_protect_master.send_with_options(
+                kwargs={"project_id": self.recruit_project.id},
+                delay=10000,  # 10 seconds
+            )
 
         elif self.content_item.project_submission_type == ContentItem.CONTINUE_REPO:
             self.recruit_project.repository = self._get_repo_to_continue_from()
@@ -967,11 +1027,11 @@ class AgileCard(models.Model, Mixins, FlavourMixin, ContentItemProxyMixin):
             self.content_item.content_type == ContentItem.TOPIC
         ), f"{self.content_item.content_type}"
         if self.content_item.topic_needs_review:
-            self.topic_progress.review_request_time = timezone.datetime.now()
+            self.topic_progress.review_request_time = timezone.now()
             self.topic_progress.save()
             self.status = AgileCard.IN_REVIEW
         else:
-            self.topic_progress.complete_time = timezone.datetime.now()
+            self.topic_progress.complete_time = timezone.now()
             self.topic_progress.save()
             self.status = AgileCard.COMPLETE
         self.save()

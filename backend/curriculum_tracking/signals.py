@@ -1,5 +1,5 @@
+from datetime import timezone
 from . import models
-
 from django.dispatch import receiver
 from django.db.models.signals import post_save, pre_save
 from django.db.models import Q
@@ -9,6 +9,7 @@ from curriculum_tracking.constants import (
     RED_FLAG,
     EXCELLENT,
 )
+from django.utils import timezone
 
 # @receiver([m2m_changed], sender=models.AgileCard.assignees.through)
 # def make_sure_project_assignees_match_card(sender, instance, **kwargs):
@@ -72,7 +73,7 @@ from curriculum_tracking.constants import (
 
 @receiver([pre_save], sender=models.RecruitProjectReview)
 def set_trusted_on_create(sender, instance, **kwargs):
-    
+
     if instance.trusted == None:
         instance.trusted = instance.recruit_project.is_trusted_reviewer(
             instance.reviewer_user
@@ -80,7 +81,9 @@ def set_trusted_on_create(sender, instance, **kwargs):
 
 
 @receiver([post_save], sender=models.AgileCard)
-def unblock_cards(sender, instance, created, raw, using, update_fields, **kwargs):
+def unblock_cards_and_update_complete_time(
+    sender, instance, created, raw, using, update_fields, **kwargs
+):
     if instance.status == models.AgileCard.COMPLETE:
         for card in instance.required_by_cards.filter(status=models.AgileCard.BLOCKED):
             still_needs = card.requires_cards.filter(
@@ -89,6 +92,20 @@ def unblock_cards(sender, instance, created, raw, using, update_fields, **kwargs
             if still_needs == 0:
                 card.status = models.AgileCard.READY
                 card.save()
+
+        progress_instance = instance.progress_instance
+        if progress_instance.__class__ == models.WorkshopAttendance:
+            return
+
+        if progress_instance.complete_time == None:
+            review = progress_instance.latest_review(trusted=True)
+            if review:
+                progress_instance.complete_time = review.timestamp
+            else:
+                progress_instance.complete_time = timezone.now()
+            progress_instance.save()
+
+        assert instance.complete_time != None, instance
 
 
 @receiver([post_save], sender=models.TopicReview)
@@ -151,8 +168,11 @@ def maybe_move_card_because_of_project_review(sender, instance, created, **kwarg
     )
 
     if user_is_trusted:
+        recruit_project = instance.recruit_project
         card.status = models.AgileCard.COMPLETE
         card.save()
+        recruit_project.complete_time = instance.timestamp
+        recruit_project.save()
 
 
 @receiver([post_save], sender=models.RecruitProjectReview)
@@ -160,7 +180,9 @@ def update_project_review_counts(sender, instance, created, **kwargs):
     """whenever a new review is added to a project then update the appropriate review count"""
     if not created:
         return
+    instance.update_recent_validation_flags_for_project()
     project = instance.recruit_project
+
     if instance.status == NOT_YET_COMPETENT:
         project.code_review_ny_competent_since_last_review_request += 1
     elif instance.status == COMPETENT:

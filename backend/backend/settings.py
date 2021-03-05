@@ -13,7 +13,6 @@ https://docs.djangoproject.com/en/2.2/ref/settings/
 import os
 import sys
 
-
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -137,6 +136,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "logging_middleware.RequestUserLogMiddleware",
 ]
 
 ROOT_URLCONF = "backend.urls"
@@ -344,3 +344,8 @@ ROCKETCHAT = {
 }
 
 GITHUB_BOT_USERNAME = "umuzibot" or os.environ.get("GIT_REAL_PERSONAL_GITHUB_NAME")
+
+RABBITMQ_USER = os.environ.get("RABBITMQ_USER")
+RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST")
+RABBITMQ_PASSWORD = os.environ.get("RABBITMQ_PASSWORD")
+RABBITMQ_PORT = os.environ.get("RABBITMQ_PORT", "5672")

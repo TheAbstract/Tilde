@@ -4,7 +4,7 @@ from curriculum_tracking import models
 from curriculum_tracking.constants import NOT_YET_COMPETENT
 from core.tests.factories import UserFactory, CurriculumFactory
 from git_real.tests.factories import RepositoryFactory
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django.utils import timezone
 
 
@@ -49,7 +49,6 @@ _next_int_iterator = _next_int_generator()
 
 
 class FlavourMixin:
-
     @staticmethod
     def flavours(self, create, extracted, **kwargs):
         if not create:
@@ -59,6 +58,7 @@ class FlavourMixin:
             self.set_flavours(extracted)
         else:
             pass
+
 
 class TagMixin:
     @staticmethod
@@ -80,9 +80,7 @@ class TagFactory(DjangoModelFactory):
     name = factory.LazyAttribute(lambda *args, **kwargs: next(_tag_name_iterator))
 
 
-
-
-class ProjectContentItemFactory(DjangoModelFactory,TagMixin):
+class ProjectContentItemFactory(DjangoModelFactory, TagMixin):
     class Meta:
         model = "curriculum_tracking.ContentItem"
 
@@ -96,17 +94,16 @@ class ProjectContentItemFactory(DjangoModelFactory,TagMixin):
     project_submission_type = models.ContentItem.REPOSITORY
     template_repo = "https://github.com/Umuzi-org/bwahahhahaaaa"
 
-
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
+        FlavourMixin.flavours(self, *args, **kwargs)
 
     @factory.post_generation
     def tags(self, *args, **kwargs):
-        TagMixin.tags(self,*args, **kwargs)
+        TagMixin.tags(self, *args, **kwargs)
 
 
-class ContentItemFactory(DjangoModelFactory): 
+class ContentItemFactory(DjangoModelFactory):
     class Meta:
         model = "curriculum_tracking.ContentItem"
 
@@ -121,11 +118,11 @@ class ContentItemFactory(DjangoModelFactory):
 
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
+        FlavourMixin.flavours(self, *args, **kwargs)
 
     @factory.post_generation
     def tags(self, *args, **kwargs):
-        TagMixin.tags(self,*args, **kwargs)
+        TagMixin.tags(self, *args, **kwargs)
 
 
 class ReviewTrustFactory(DjangoModelFactory):
@@ -137,16 +134,15 @@ class ReviewTrustFactory(DjangoModelFactory):
 
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
-        
+        FlavourMixin.flavours(self, *args, **kwargs)
+
 
 class RecruitProjectFactory(DjangoModelFactory):
     class Meta:
         model = "curriculum_tracking.RecruitProject"
 
     content_item = factory.SubFactory(ProjectContentItemFactory)
-    due_time = datetime.now() + timedelta(days=1)
-    complete_time = datetime.now()
+    due_time = timezone.now() + timedelta(days=1)
     repository = factory.SubFactory(RepositoryFactory)
 
     @factory.post_generation
@@ -162,7 +158,22 @@ class RecruitProjectFactory(DjangoModelFactory):
 
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
+        FlavourMixin.flavours(self, *args, **kwargs)
+
+
+class RecruitProjectInRevewColumnFactory(RecruitProjectFactory):
+    start_time = factory.lazy_attribute(
+        lambda *a, **k: timezone.now() - timedelta(days=15)
+    )
+    review_request_time = factory.lazy_attribute(
+        lambda *a, **k: timezone.now() - timedelta(days=10)
+    )
+
+
+#     project = RecruitProjectFactory(*args, **kwargs)
+#     project.project.request_review(force_timestamp=timezone.now() + timedelta(days=10))
+#     project.save()
+#     return project
 
 
 class RecruitProjectReviewFactory(DjangoModelFactory):
@@ -172,7 +183,7 @@ class RecruitProjectReviewFactory(DjangoModelFactory):
     status = NOT_YET_COMPETENT
     timestamp = factory.lazy_attribute(lambda o: timezone.now())
     comments = "something seriously useful"
-    recruit_project = factory.SubFactory(RecruitProjectFactory)
+    recruit_project = factory.SubFactory(RecruitProjectInRevewColumnFactory)
     reviewer_user = factory.SubFactory(UserFactory)
 
 
@@ -188,8 +199,7 @@ class TopicProgressFactory(DjangoModelFactory):
     # review_request_time
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
-
+        FlavourMixin.flavours(self, *args, **kwargs)
 
 
 class TopicReviewFactory(DjangoModelFactory):
@@ -197,7 +207,7 @@ class TopicReviewFactory(DjangoModelFactory):
         model = "curriculum_tracking.TopicReview"
 
     status = NOT_YET_COMPETENT
-    timestamp = datetime.now()
+    timestamp = timezone.now()
     comments = "something seriously useful"
     topic_progress = factory.SubFactory(TopicProgressFactory)
     reviewer_user = factory.SubFactory(UserFactory)
@@ -229,7 +239,7 @@ class AgileCardFactory(DjangoModelFactory):
 
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
+        FlavourMixin.flavours(self, *args, **kwargs)
 
     # @factory.post_generation
     # def assignees(self, create, extracted, **kwargs):
@@ -268,7 +278,9 @@ class CurriculumContentRequirementFactory(DjangoModelFactory):
 
     @factory.post_generation
     def flavours(self, *args, **kwargs):
-        FlavourMixin.flavours(self,*args, **kwargs)
+        FlavourMixin.flavours(self, *args, **kwargs)
+
+
 class CourseRegistrationFactory(DjangoModelFactory):
     class Meta:
         model = "curriculum_tracking.CourseRegistration"
@@ -287,4 +299,4 @@ class WorkshopAttendanceFactory(DjangoModelFactory):
 
     attendee_user = factory.SubFactory(UserFactory)
     content_item = factory.SubFactory(ProjectContentItemFactory)
-    timestamp = timezone.datetime.now()
+    timestamp = timezone.now()

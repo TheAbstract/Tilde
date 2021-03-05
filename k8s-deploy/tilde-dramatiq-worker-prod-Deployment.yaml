@@ -10,26 +10,28 @@ apiVersion: apps/v1
 
 kind: Deployment
 metadata:
-  name: tilde-backend
+  name: tilde-dramatiq-worker
   labels:
-    app: tilde-backend
+    app: tilde-dramatiq-worker
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: tilde-backend
+      app: tilde-dramatiq-worker
   template:
     metadata:
       labels:
-        app: tilde-backend
+        app: tilde-dramatiq-worker
     spec:
       containers:
-        - name: tilde-backend-app
+        - name: tilde-dramatiq-worker-app
           # Replace  with your project ID or use `make template`
           image: gcr.io/umuzi-prod/tilde-backend:latest
           # This setting makes nodes pull the docker image every time before
           # starting the pod. This is useful when debugging, but should be turned
           # off in production.
+          command: ["dramatiq"]
+          args: ["long_running_request_actors"]
           imagePullPolicy: Always
           env:
             # [START cloudsql_secrets]
@@ -63,8 +65,8 @@ spec:
 
             # [START git misc config]
 
-            - name: STATIC_URL
-              value: https://storage.googleapis.com/tilde-backend-collectstatic/static/
+            # - name: STATIC_URL
+            #   value: ""
             - name: PROD_MODE
               value: "1"
             - name: PROD_SECRET_KEY
@@ -72,12 +74,15 @@ spec:
                 secretKeyRef:
                   name: miscbackend
                   key: PROD_SECRET_KEY
-
             - name: SQL_CONNECTION_NAME
               value: umuzi-prod:europe-west2:prod
             - name: GOOGLE_OAUTH_ONE_TIME_CLIENT_SECRET_FILE
               value: /secrets/google-oauth-onetime-creds/google-oauth-onetime-creds.json
-  
+            - name: PROD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: miscbackend
+                  key: PROD_SECRET_KEY
             - name: RABBITMQ_USER
               value: rabbit
             - name: RABBITMQ_HOST
@@ -89,14 +94,15 @@ spec:
                 secretKeyRef:
                   name: tilde-rabbitmq-rabbitmq-secret
                   key: rabbitmq-pass
-
+            
           volumeMounts:
             - name: google-oauth-onetime-creds
               mountPath: /secrets/google-oauth-onetime-creds
               readOnly: true
+            
 
-          ports:
-            - containerPort: 8080
+          # ports:
+          #   - containerPort: 8080
 
           readinessProbe:
             # an http probe

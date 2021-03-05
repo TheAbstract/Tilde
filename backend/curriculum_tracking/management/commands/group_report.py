@@ -14,7 +14,6 @@ from django.db.models import Q
 
 
 logger = logging.getLogger(__name__)
-cutoff = timezone.now() - datetime.timedelta(days=7)
 
 AS_REVIEWER = "R"
 AS_ASSIGNEE = "A"
@@ -23,6 +22,10 @@ AS_ASSIGNEE = "A"
 DATE_FORMAT = "%-d-%b-%y"
 # dd-mmm-yy
 # eg. 12-Nov-20
+
+
+accumulated_user_as_reviewer_stats = {}
+accumulated_user_as_assignee_stats = {}
 
 
 def sum_card_weights(cards):
@@ -158,7 +161,7 @@ def recent_review_count(card, user):
     return reviews.count()
 
 
-def user_as_reviewer_stats(user):
+def user_as_reviewer_stats(user, cutoff):
     reviews_done_this_week = RecruitProjectReview.objects.filter(
         reviewer_user=user
     ).filter(timestamp__gte=cutoff)
@@ -227,12 +230,12 @@ def user_as_reviewer_stats(user):
     }
 
 
-def get_user_report(user, extra=None):
+def get_user_report(user, cutoff, extra=None):
     logger.info(f"...Processing user: {user}")
     stats = {
         "_email": user.email,
         "_id": user.id,
-        "_snapshot_date": datetime.datetime.now(),
+        "_snapshot_date": timezone.now(),
         "_employer_partner": "",
         "_last_login_time": None,
         "_start_date": None,
@@ -243,8 +246,18 @@ def get_user_report(user, extra=None):
     for k, v in (extra or {}).items():
         stats[k] = v
 
-    user_as_reviewer = user_as_reviewer_stats(user)
-    user_as_assignee = user_as_assignee_stats(user)
+    accumulated_user_as_reviewer_stats[
+        user.id
+    ] = accumulated_user_as_reviewer_stats.get(
+        user.id, user_as_reviewer_stats(user, cutoff)
+    )
+
+    user_as_reviewer = accumulated_user_as_reviewer_stats[user.id]
+
+    accumulated_user_as_assignee_stats[
+        user.id
+    ] = accumulated_user_as_assignee_stats.get(user.id, user_as_assignee_stats(user))
+    user_as_assignee = accumulated_user_as_assignee_stats[user.id]
     for s in user_as_reviewer:
         stats[f"{AS_REVIEWER} {s}"] = user_as_reviewer[s]
     for s in user_as_assignee:
@@ -253,10 +266,10 @@ def get_user_report(user, extra=None):
     return stats
 
 
-def get_group_report(group):
+def get_group_report(group, cutoff):
     logger.info(f"processing group: {group}")
     ret = [
-        get_user_report(o, {"_group": group.name})
+        get_user_report(user=o, cutoff=cutoff, extra={"_group": group.name})
         for o in group.user_set.filter(active=True)
         # for o in TeamMembership.objects.filter(group=group, user__active=True)
     ]
@@ -283,22 +296,27 @@ def get_group_report(group):
     for key in numeric_values:
         values = [d[key] for d in ret]
 
-    for d in ret:
-        d[f"{key} grp tot"] = sum(values)
-        d[f"{key} grp ave"] = sum(values) / len(values)
-        d["_group_managers"] = ",".join([o.user.email for o in manager_users])
+        for d in ret:
+            d[f"{key} grp tot"] = sum(values)
+            d[f"{key} grp ave"] = sum(values) / len(values)
+            d["_group_managers"] = ",".join([o.user.email for o in manager_users])
 
     return ret
 
 
 class Command(BaseCommand):
+    def add_arguments(self, parser):
+        parser.add_argument("days", type=int, nargs="?")
+
     def handle(self, *args, **options):
-        today = datetime.datetime.now().date()
+        today = timezone.now().date()
+        days = options.get("days") or 7
+        cutoff = timezone.now() - datetime.timedelta(days=days)
 
         groups = Team.objects.filter(active=True)
         all_data = []
         for group in groups:
-            all_data.extend(get_group_report(group))
+            all_data.extend(get_group_report(group, cutoff))
             # break
 
         # headings = []
@@ -313,15 +331,19 @@ class Command(BaseCommand):
         )
 
         with open(
-            Path(f"gitignore/group_report_{today.strftime('%a %d %b %Y')}.csv"),
+            Path(
+                f"gitignore/group_report_{today.strftime('%a %d %b %Y')}__last_{days}_days.csv"
+            ),
             "w",
         ) as f:
             writer = csv.writer(f)
             writer.writerow(headings)
             writer.writerows([[d[heading] for heading in headings] for d in all_data])
 
+        # from google_helpers.utils import
+
         for data in all_data:
             for key in data.keys():
                 if key not in headings:
-                    breakpoint()
+                    # breakpoint()
                     pass

@@ -299,11 +299,17 @@ class AgileCardViewset(viewsets.ModelViewSet):
                 permissions=Team.PERMISSION_REVIEW_CARDS,
                 get_objects=_get_teams_from_card,
             )
+            | HasObjectPermission(
+                permissions=Team.PERMISSION_TRUSTED_REVIEWER,
+                get_objects=_get_teams_from_card,
+            )
         ],
     )
     def add_review(self, request, pk=None):
+
         # TODO: Debounce or rate limit
         card = self.get_object()
+        # breakpoint()
 
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
@@ -313,7 +319,7 @@ class AgileCardViewset(viewsets.ModelViewSet):
 
                 models.RecruitProjectReview.objects.create(
                     status=serializer.data["status"],
-                    timestamp=timezone.datetime.now(),
+                    timestamp=timezone.now(),
                     comments=serializer.data["comments"],
                     recruit_project=card.recruit_project,
                     reviewer_user=request.user,
@@ -324,7 +330,7 @@ class AgileCardViewset(viewsets.ModelViewSet):
 
                 models.TopicReview.objects.create(
                     status=serializer.data["status"],
-                    timestamp=timezone.datetime.now(),
+                    timestamp=timezone.now(),
                     comments=serializer.data["comments"],
                     topic_progress=card.topic_progress,
                     reviewer_user=request.user,
@@ -528,7 +534,7 @@ class AgileCardViewset(viewsets.ModelViewSet):
         card = self.get_card_or_error(
             status_or_404=None, type_or_404=models.ContentItem.WORKSHOP
         )
-        card.attended_workshop(timestamp=timezone.datetime.now())
+        card.attended_workshop(timestamp=timezone.now())
         return Response(serializers.AgileCardSerializer(card).data)
         # serializer = self.get_serializer(data=request.data)
 
@@ -845,28 +851,33 @@ class ManagmentActionsViewSet(viewsets.ViewSet):
         detail=False,
         methods=["post", "get"],
         serializer_class=serializers.GroupSelfReviewSerialiser,
-        permission_classes=[DenyAll],  # TODO
+        permission_classes=[permissions.IsAdminUser],  # TODO
     )
-    def group_self_review_random(self, request, pk=None):
+    def team_shuffle_review_self(self, request, pk=None):
         """randomise group members and assign them as reviewers to each others cards for a specific project"""
-        if request.method == "GET":
-            return Response()
-        todo
+        if request.method == "get":
+            return Response({"status": "OK"})
+        from long_running_request_actors import team_shuffle_review_self as actor
+
+        response = actor.send(
+            team_id="todo", flavour_names="todo", content_item_id="todo"
+        )
+        return Response({"status": "OK", "data": response.asdict()})
 
     @action(
         detail=False,
         methods=["post", "get"],
-        serializer_class=serializers.GroupReviewByOtherSerialiser,
+        serializer_class=serializers.TeamReviewByOtherSerialiser,
         permission_classes=[DenyAll],  # TODO
     )
-    def group_review_by_other(self, request, pk=None):
+    def team_review_by_other(self, request, pk=None):
         """grab users from another group and randomise them as reviewers for this group"""
         todo
 
     @action(
         detail=False,
         methods=["post", "get"],
-        serializer_class=serializers.GroupReviewByUserSerialiser,
+        serializer_class=serializers.TeamReviewByUserSerialiser,
         permission_classes=[DenyAll],  # TODO
     )
     def assign_user_as_reviewer(self, request, pk=None):
